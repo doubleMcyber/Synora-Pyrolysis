@@ -5,6 +5,7 @@ def test_import():
 
 
 def test_layer1_public_api_imports() -> None:
+    from synora.calibration.surrogate_fit import calibrated_predict, fit_surrogate
     from synora.economics.lcoh import EconInputs, hourly_economics
     from synora.reactor.model import (
         ReactorInputs,
@@ -23,3 +24,5 @@ def test_layer1_public_api_imports() -> None:
     assert EconInputs is not None
     assert hourly_economics is not None
     assert run_simulation is not None
+    assert fit_surrogate is not None
+    assert calibrated_predict is not None

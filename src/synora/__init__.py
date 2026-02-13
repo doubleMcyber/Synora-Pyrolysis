@@ -1,5 +1,6 @@
 """Synora package public API for the Layer 1 vertical slice."""
 
+from synora.calibration.surrogate_fit import calibrate_and_store, calibrated_predict
 from synora.economics.lcoh import EconInputs, hourly_economics
 from synora.reactor.model import (
     ReactorInputs,
@@ -22,4 +23,6 @@ __all__ = [
     "EconInputs",
     "hourly_economics",
     "run_simulation",
+    "calibrated_predict",
+    "calibrate_and_store",
 ]
