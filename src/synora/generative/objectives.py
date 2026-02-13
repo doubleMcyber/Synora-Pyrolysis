@@ -68,13 +68,26 @@ def evaluate_design_surrogate(
         params_path=surrogate_params_path,
     )
 
+    conversion_mean = float(pred["methane_conversion"])
+    conversion_std = float(pred.get("methane_conversion_std", 0.0))
+    h2_yield_mean = float(pred["h2_yield_mol_per_mol_ch4"])
+    h2_yield_std = float(pred.get("h2_yield_mol_per_mol_ch4_std", 0.0))
+    carbon_proxy_mean = float(pred["carbon_formation_index"])
+    carbon_proxy_std = float(pred.get("carbon_formation_index_std", 0.0))
+    is_ood = bool(pred.get("is_out_of_distribution", False))
+    ood_score = float(pred.get("ood_score", 0.0))
+
     pressure_factor = np.clip(1.0 + (0.03 * (design.pressure_atm - 1.0)), 0.85, 1.15)
-    conversion = float(np.clip(pred["methane_conversion"] * pressure_factor, 0.0, 0.99))
-    h2_yield = float(np.clip(pred["h2_yield_mol_per_mol_ch4"] * pressure_factor, 0.0, 2.0))
-    carbon_proxy = float(max(0.0, pred["carbon_formation_index"]))
+    conversion = float(np.clip(conversion_mean * pressure_factor, 0.0, 0.99))
+    conversion_std = float(max(0.0, conversion_std * pressure_factor))
+    h2_yield = float(np.clip(h2_yield_mean * pressure_factor, 0.0, 2.0))
+    h2_yield_std = float(max(0.0, h2_yield_std * pressure_factor))
+    carbon_proxy = float(max(0.0, carbon_proxy_mean))
+    carbon_proxy_std = float(max(0.0, carbon_proxy_std))
 
     methane_mol_per_hr = design.methane_kg_per_hr / CH4_MW_KG_PER_MOL
     h2_rate_kg_per_hr = methane_mol_per_hr * h2_yield * H2_MW_KG_PER_MOL
+    h2_rate_std_kg_per_hr = methane_mol_per_hr * h2_yield_std * H2_MW_KG_PER_MOL
     carbon_generation_rate = (
         design.methane_kg_per_hr
         * conversion
@@ -82,6 +95,7 @@ def evaluate_design_surrogate(
         * design.effective_carbon_release_factor
     )
     fouling_risk_index = carbon_proxy * design.effective_carbon_release_factor
+    fouling_risk_std = carbon_proxy_std * design.effective_carbon_release_factor
 
     pressure_drop = _pressure_drop_proxy(design)
     heat_loss = _heat_loss_proxy(design)
@@ -106,16 +120,31 @@ def evaluate_design_surrogate(
         violations.append("residence_time_below_min")
     if design.residence_time_s > constraint_cfg["max_residence_time_s"]:
         violations.append("residence_time_above_max")
+    if is_ood:
+        violations.append("out_of_distribution")
 
     return {
         "conversion": conversion,
+        "conversion_std": conversion_std,
+        "conversion_ci_lower": max(0.0, conversion - (2.0 * conversion_std)),
+        "conversion_ci_upper": min(1.0, conversion + (2.0 * conversion_std)),
+        "h2_yield_mol_per_mol_ch4": h2_yield,
+        "h2_yield_std": h2_yield_std,
+        "h2_yield_ci_lower": max(0.0, h2_yield - (2.0 * h2_yield_std)),
+        "h2_yield_ci_upper": min(2.0, h2_yield + (2.0 * h2_yield_std)),
         "h2_rate": float(max(0.0, h2_rate_kg_per_hr)),
+        "h2_rate_std": float(max(0.0, h2_rate_std_kg_per_hr)),
         "fouling_risk_index": float(max(0.0, fouling_risk_index)),
+        "fouling_risk_index_std": float(max(0.0, fouling_risk_std)),
+        "fouling_risk_ci_lower": max(0.0, fouling_risk_index - (2.0 * fouling_risk_std)),
+        "fouling_risk_ci_upper": max(0.0, fouling_risk_index + (2.0 * fouling_risk_std)),
         "pressure_drop_proxy": pressure_drop,
         "heat_loss_proxy": heat_loss,
         "profit_per_hr": float(economics["profit_per_hr"]),
         "lcoh_usd_per_kg": float(economics["lcoh_usd_per_kg"]),
         "carbon_generation_rate": float(max(0.0, carbon_generation_rate)),
+        "is_out_of_distribution": is_ood,
+        "ood_score": ood_score,
         "constraint_violations": violations,
         "constraint_violation_count": float(len(violations)),
     }
@@ -127,6 +156,7 @@ def scalarize_metrics(metrics: dict[str, float | list[str]]) -> float:
     fouling = float(metrics["fouling_risk_index"])
     pressure_drop = float(metrics["pressure_drop_proxy"])
     heat_loss = float(metrics["heat_loss_proxy"])
+    ood_score = float(metrics.get("ood_score", 0.0))
     violation_count = float(metrics["constraint_violation_count"])
     return (
         profit
@@ -134,6 +164,7 @@ def scalarize_metrics(metrics: dict[str, float | list[str]]) -> float:
         - (18.0 * fouling)
         - (8.0 * pressure_drop)
         - (6.0 * heat_loss)
+        - (12.0 * ood_score)
         - (60.0 * violation_count)
     )
 

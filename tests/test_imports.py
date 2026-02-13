@@ -5,12 +5,17 @@ def test_import():
 
 
 def test_layer1_public_api_imports() -> None:
-    from synora.calibration.surrogate_fit import calibrated_predict, fit_surrogate
+    from synora.calibration.surrogate_fit import (
+        calibrated_predict,
+        fit_surrogate,
+        predict_with_uncertainty,
+    )
     from synora.economics.lcoh import EconInputs, hourly_economics
     from synora.generative.active_learning import run_active_learning
     from synora.generative.design_space import ReactorDesign
     from synora.generative.objectives import evaluate_design_surrogate
     from synora.generative.optimizer import propose_designs
+    from synora.generative.report import generate_design_report
     from synora.physics.label_pfr import PFRLabeler
     from synora.reactor.model import (
         ReactorInputs,
@@ -31,8 +36,10 @@ def test_layer1_public_api_imports() -> None:
     assert run_simulation is not None
     assert fit_surrogate is not None
     assert calibrated_predict is not None
+    assert predict_with_uncertainty is not None
     assert ReactorDesign is not None
     assert evaluate_design_surrogate is not None
     assert propose_designs is not None
     assert run_active_learning is not None
+    assert generate_design_report is not None
     assert PFRLabeler is not None

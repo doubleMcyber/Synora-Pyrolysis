@@ -121,6 +121,7 @@ def run_active_learning(
     constraints: dict[str, float] | None = None,
     label_function: LabelFunction | None = None,
     seed: int = 42,
+    ensemble_size: int = 7,
 ) -> ActiveLearningResult:
     if iterations <= 0:
         msg = "iterations must be positive"
@@ -167,7 +168,12 @@ def run_active_learning(
             dataset = pd.concat([dataset, new_rows], ignore_index=True)
         dataset.to_parquet(dataset_file, index=False)
 
-        model = fit_surrogate(dataset, degree=2)
+        model = fit_surrogate(
+            dataset,
+            degree=2,
+            ensemble_size=ensemble_size,
+            random_seed=seed + iter_idx,
+        )
         save_surrogate_params(model, params_path=params_file)
 
         iteration_summaries.append(

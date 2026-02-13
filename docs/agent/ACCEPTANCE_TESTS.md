@@ -72,6 +72,30 @@ Tests:
 
 ---
 
+## Layer 5 — Credibility & Confidence Upgrade (Sprint 2)
+Acceptance:
+1. Surrogate supports bootstrap ensemble uncertainty and returns:
+   - mean prediction
+   - std deviation
+   - +/- 2sigma interval for conversion, H2 yield, and carbon index
+2. OOD detection is available on calibrated predictions and in design metrics:
+   - `is_out_of_distribution`
+   - `ood_score`
+3. Design Explorer supports "Physics Verify Selected Design" workflow with clear physics vs surrogate labeling.
+4. Design Explorer supports report export for selected design to JSON artifact.
+5. Geometry-driven design definition remains intact:
+   - residence time is derived from geometry and flow (not direct input).
+
+Tests:
+- Uncertainty standard deviations are non-negative
+- Ensemble behavior improves RMSE stability vs individual members
+- OOD design triggers OOD flag
+- Geometry change alters derived residence time
+- Physics-verify independent active-learning path still runs in mocked test mode
+- Report artifact generation test passes
+
+---
+
 # Minimum Passing Criteria Across All Layers
 - `ruff check .` passes
 - `pytest -q` passes

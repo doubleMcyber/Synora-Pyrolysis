@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from numbers import Number
 from pathlib import Path
 
 import numpy as np
@@ -21,14 +22,18 @@ class DesignEvaluation:
     def violation_count(self) -> float:
         return float(self.metrics["constraint_violation_count"])
 
-    def to_dict(self) -> dict[str, float | str]:
-        payload: dict[str, float | str] = design_to_flat_dict(self.design)
+    def to_dict(self) -> dict[str, float | str | bool]:
+        payload: dict[str, float | str | bool] = design_to_flat_dict(self.design)
         payload["score"] = self.score
         for key, value in self.metrics.items():
             if key == "constraint_violations":
                 payload[key] = ",".join(value) if isinstance(value, list) else str(value)
-            else:
+            elif isinstance(value, bool):
+                payload[key] = bool(value)
+            elif isinstance(value, Number):
                 payload[key] = float(value)
+            else:
+                payload[key] = str(value)
         return payload
 
 

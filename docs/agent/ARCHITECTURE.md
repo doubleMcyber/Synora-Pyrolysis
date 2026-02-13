@@ -47,6 +47,11 @@ Purpose: Surrogate training, persistence, and prediction utilities.
 Public API:
 from synora.calibration.surrogate_fit import fit_surrogate, calibrated_predict, calibrate_and_store
 
+Contracts:
+- Supports bootstrap surrogate ensembles for uncertainty estimation.
+- Stores training-domain metadata for OOD detection.
+- Maintains backward compatibility with legacy single-model parameter files.
+
 ### src/synora/physics
 Purpose: Offline physics labeling via Cantera PFR.
 Public API:
@@ -63,11 +68,13 @@ from synora.generative.design_space import ReactorDesign, DesignBounds
 from synora.generative.objectives import evaluate_design_surrogate
 from synora.generative.optimizer import propose_designs
 from synora.generative.active_learning import run_active_learning
+from synora.generative.report import generate_design_report
 
 Contracts:
 - Design evaluation uses surrogate and analytic proxies only.
 - Optimizer returns deterministic results for a fixed seed.
 - Active learning performs: propose -> physics label -> append -> refit.
+- Design report generation exports JSON artifacts for decision traceability.
 
 ### scripts/physics/generate_pfr_dataset.py
 Purpose: Batch physics label generation for calibration datasets.
@@ -80,6 +87,8 @@ Contract:
 - Uses Plotly for charts
 - Imports simulation and generative logic from synora package
 - Includes design exploration views (leaderboard, Pareto, candidate inspection)
+- Supports on-demand physics verification from selected design.
+- Supports design report export with uncertainty and OOD context.
 
 ## Generative Data Flow
 

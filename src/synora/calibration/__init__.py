@@ -1,5 +1,8 @@
 from synora.calibration.surrogate_fit import (
     DEFAULT_PARAMS_PATH,
+    FEATURE_COLUMNS,
+    TARGET_COLUMNS,
+    SurrogateMember,
     SurrogateModel,
     calibrate_and_store,
     calibrated_predict,
@@ -7,14 +10,19 @@ from synora.calibration.surrogate_fit import (
     load_pfr_dataset,
     load_surrogate_params,
     predict_with_model,
+    predict_with_uncertainty,
     save_surrogate_params,
 )
 
 __all__ = [
     "DEFAULT_PARAMS_PATH",
+    "FEATURE_COLUMNS",
+    "TARGET_COLUMNS",
+    "SurrogateMember",
     "SurrogateModel",
     "fit_surrogate",
     "predict_with_model",
+    "predict_with_uncertainty",
     "load_pfr_dataset",
     "save_surrogate_params",
     "load_surrogate_params",

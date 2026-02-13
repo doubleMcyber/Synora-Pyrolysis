@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -7,14 +9,18 @@ import streamlit as st
 
 from synora.calibration.surrogate_fit import (
     DEFAULT_PARAMS_PATH,
+    DEFAULT_PHYSICS_DIR,
     calibrate_and_store,
     calibrated_predict,
+    latest_physics_dataset,
     load_pfr_dataset,
 )
 from synora.economics.lcoh import EconInputs
 from synora.generative.design_space import ReactorDesign
 from synora.generative.objectives import evaluate_design_surrogate
 from synora.generative.optimizer import evaluations_to_frame, propose_designs
+from synora.generative.report import generate_design_report
+from synora.physics.label_pfr import label_pfr_case
 from synora.twin.simulator import run_simulation
 
 st.set_page_config(page_title="Synora Twin Console", layout="wide")
@@ -79,8 +85,11 @@ def _predict_frame(
             {
                 "temperature_c": float(temp_c),
                 "methane_conversion": pred["methane_conversion"],
+                "methane_conversion_std": pred.get("methane_conversion_std", 0.0),
                 "h2_yield_mol_per_mol_ch4": pred["h2_yield_mol_per_mol_ch4"],
+                "h2_yield_std": pred.get("h2_yield_mol_per_mol_ch4_std", 0.0),
                 "carbon_formation_index": pred["carbon_formation_index"],
+                "carbon_formation_index_std": pred.get("carbon_formation_index_std", 0.0),
             }
         )
     return pd.DataFrame(rows)
@@ -116,6 +125,28 @@ def _profit_envelope(
             }
         )
     return pd.DataFrame(rows)
+
+
+def _append_physics_label_to_dataset(
+    label: dict[str, float], dataset_path: Path | None = None
+) -> Path:
+    if dataset_path is None:
+        try:
+            target_path = latest_physics_dataset(DEFAULT_PHYSICS_DIR)
+        except FileNotFoundError:
+            DEFAULT_PHYSICS_DIR.mkdir(parents=True, exist_ok=True)
+            target_path = DEFAULT_PHYSICS_DIR / "physics_verified_labels.parquet"
+    else:
+        target_path = dataset_path
+
+    row = pd.DataFrame([label])
+    if target_path.exists():
+        existing = pd.read_parquet(target_path)
+        merged = pd.concat([existing, row], ignore_index=True)
+    else:
+        merged = row
+    merged.to_parquet(target_path, index=False)
+    return target_path
 
 
 with st.sidebar:
@@ -225,6 +256,34 @@ with tab_overview:
                 line=dict(color=ACCENT_BLUE, width=2.5),
             )
         )
+        conv_upper = surrogate_slice["methane_conversion"] + (
+            2.0 * surrogate_slice["methane_conversion_std"]
+        )
+        conv_lower = surrogate_slice["methane_conversion"] - (
+            2.0 * surrogate_slice["methane_conversion_std"]
+        )
+        conv_fig.add_trace(
+            go.Scatter(
+                x=surrogate_slice["temperature_c"],
+                y=np.clip(conv_upper, 0.0, 1.0),
+                mode="lines",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        conv_fig.add_trace(
+            go.Scatter(
+                x=surrogate_slice["temperature_c"],
+                y=np.clip(conv_lower, 0.0, 1.0),
+                mode="lines",
+                line=dict(width=0),
+                fill="tonexty",
+                fillcolor="rgba(76,141,255,0.18)",
+                name="Surrogate +/- 2sigma",
+                hoverinfo="skip",
+            )
+        )
         conv_fig.update_layout(
             template=PLOT_TEMPLATE,
             title="Methane Conversion: Physics vs Surrogate",
@@ -250,6 +309,34 @@ with tab_overview:
                 mode="lines",
                 name="Surrogate",
                 line=dict(color=ACCENT_GREEN, width=2.5),
+            )
+        )
+        h2_upper = surrogate_slice["h2_yield_mol_per_mol_ch4"] + (
+            2.0 * surrogate_slice["h2_yield_std"]
+        )
+        h2_lower = surrogate_slice["h2_yield_mol_per_mol_ch4"] - (
+            2.0 * surrogate_slice["h2_yield_std"]
+        )
+        h2_fig.add_trace(
+            go.Scatter(
+                x=surrogate_slice["temperature_c"],
+                y=np.clip(h2_upper, 0.0, 2.0),
+                mode="lines",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        h2_fig.add_trace(
+            go.Scatter(
+                x=surrogate_slice["temperature_c"],
+                y=np.clip(h2_lower, 0.0, 2.0),
+                mode="lines",
+                line=dict(width=0),
+                fill="tonexty",
+                fillcolor="rgba(51,209,122,0.18)",
+                name="Surrogate +/- 2sigma",
+                hoverinfo="skip",
             )
         )
         h2_fig.update_layout(
@@ -434,8 +521,12 @@ with tab_design:
             "score",
             "profit_per_hr",
             "conversion",
+            "conversion_std",
             "h2_rate",
             "fouling_risk_index",
+            "fouling_risk_index_std",
+            "ood_score",
+            "is_out_of_distribution",
             "pressure_drop_proxy",
             "heat_loss_proxy",
             "constraint_violation_count",
@@ -457,6 +548,10 @@ with tab_design:
         st.dataframe(ranked[available_columns], width="stretch")
 
         pareto_cols = st.columns(2)
+        ood_mask = ranked["is_out_of_distribution"].astype(bool)
+        marker_colors = np.where(ood_mask, "#ff4d4f", ACCENT_BLUE)
+        marker_symbols = np.where(ood_mask, "x", "circle")
+
         pareto_fig = go.Figure()
         pareto_fig.add_trace(
             go.Scatter(
@@ -465,15 +560,14 @@ with tab_design:
                 mode="markers",
                 marker=dict(
                     size=9,
-                    color=ranked["conversion"],
-                    colorscale="Turbo",
-                    colorbar=dict(title="Conversion"),
+                    color=marker_colors,
+                    symbol=marker_symbols,
                 ),
                 text=[f"Design {idx}" for idx in ranked.index],
                 hovertemplate=(
                     "Fouling risk: %{x:.3f}<br>"
                     "Profit/hr: %{y:.2f}<br>"
-                    "Conversion: %{marker.color:.3f}<extra></extra>"
+                    "OOD flag: %{marker.symbol}<extra></extra>"
                 ),
                 name="Designs",
             )
@@ -492,7 +586,7 @@ with tab_design:
                 x=ranked["conversion"],
                 y=ranked["profit_per_hr"],
                 mode="markers",
-                marker=dict(size=9, color=ACCENT_BLUE),
+                marker=dict(size=9, color=marker_colors, symbol=marker_symbols),
                 hovertemplate="Conversion: %{x:.3f}<br>Profit/hr: %{y:.2f}<extra></extra>",
                 name="Designs",
             )
@@ -533,6 +627,18 @@ with tab_design:
             surrogate_params_path=params_path,
             econ_inputs=econ_inputs,
         )
+
+        confidence_label = "LOW"
+        if bool(selected_metrics["is_out_of_distribution"]):
+            confidence_label = "LOW (OOD)"
+        elif (
+            float(selected_metrics["conversion_std"]) < 0.01
+            and float(selected_metrics["h2_yield_std"]) < 0.03
+        ):
+            confidence_label = "HIGH"
+        elif float(selected_metrics["conversion_std"]) < 0.03:
+            confidence_label = "MEDIUM"
+
         detail_cols = st.columns(4)
         detail_cols[0].metric(
             "Selected Profit/hr (USD)", f"{float(selected_metrics['profit_per_hr']):.2f}"
@@ -542,6 +648,124 @@ with tab_design:
             "Fouling Risk Index", f"{float(selected_metrics['fouling_risk_index']):.3f}"
         )
         detail_cols[3].metric("Residence Time (s)", f"{selected_design.residence_time_s:.2f}")
+        st.markdown(
+            f"**Confidence:** `{confidence_label}` | **OOD score:** `{float(selected_metrics['ood_score']):.3f}`"
+        )
+
+        uncertainty_fig = go.Figure()
+        x_labels = ["Conversion", "H2 Yield", "Fouling Risk"]
+        surrogate_means = [
+            float(selected_metrics["conversion"]),
+            float(selected_metrics["h2_yield_mol_per_mol_ch4"]),
+            float(selected_metrics["fouling_risk_index"]),
+        ]
+        surrogate_err = [
+            2.0 * float(selected_metrics["conversion_std"]),
+            2.0 * float(selected_metrics["h2_yield_std"]),
+            2.0 * float(selected_metrics["fouling_risk_index_std"]),
+        ]
+        uncertainty_fig.add_trace(
+            go.Bar(
+                x=x_labels,
+                y=surrogate_means,
+                error_y=dict(type="data", array=surrogate_err, visible=True),
+                marker_color=[ACCENT_BLUE, ACCENT_GREEN, ACCENT_ORANGE],
+                name="Surrogate mean +/- 2sigma",
+            )
+        )
+
+        physics_label = st.session_state.get("physics_verified_label")
+        if isinstance(physics_label, dict):
+            physics_fouling = float(physics_label["carbon_formation_index"]) * (
+                1.0 - selected_design.carbon_removal_eff
+            )
+            uncertainty_fig.add_trace(
+                go.Scatter(
+                    x=x_labels,
+                    y=[
+                        float(physics_label["methane_conversion"]),
+                        float(physics_label["h2_yield_mol_per_mol_ch4"]),
+                        physics_fouling,
+                    ],
+                    mode="markers",
+                    marker=dict(color="#ffffff", size=10, symbol="diamond"),
+                    name="Physics verification",
+                )
+            )
+        uncertainty_fig.update_layout(
+            template=PLOT_TEMPLATE,
+            title="Selected Design: Surrogate Uncertainty vs Physics",
+            yaxis_title="Metric value",
+        )
+        st.plotly_chart(uncertainty_fig, width="stretch")
+
+        verify_cols = st.columns(3)
+        append_verify = verify_cols[0].checkbox(
+            "Append verification to dataset",
+            value=True,
+            key="append_verify_toggle",
+        )
+        refit_after_append = verify_cols[1].checkbox(
+            "Refit surrogate after append",
+            value=True,
+            disabled=not append_verify,
+            key="refit_after_append_toggle",
+        )
+        run_verify = verify_cols[2].button("Physics Verify Selected Design", type="secondary")
+
+        if run_verify:
+            with st.spinner("Running Cantera physics verification..."):
+                try:
+                    label = label_pfr_case(
+                        temperature_c=selected_design.temp_c,
+                        residence_time_s=selected_design.residence_time_s,
+                        pressure_atm=selected_design.pressure_atm,
+                        dilution_frac=selected_design.dilution_frac,
+                        methane_kg_per_hr=selected_design.methane_kg_per_hr,
+                    )
+                    st.session_state["physics_verified_label"] = label
+                    st.success("Physics verification complete.")
+                    if append_verify:
+                        appended_path = _append_physics_label_to_dataset(label)
+                        st.success(f"Appended verified point to `{appended_path}`.")
+                        if refit_after_append:
+                            target_params = (
+                                DEFAULT_PARAMS_PATH if params_path is None else Path(params_path)
+                            )
+                            calibrate_and_store(
+                                dataset_path=appended_path,
+                                params_path=target_params,
+                                ensemble_size=7,
+                                random_seed=42,
+                                verbose=False,
+                            )
+                            st.success("Surrogate refit completed from updated dataset.")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Physics verification failed: {exc}")
+
+        report_cols = st.columns(2)
+        if report_cols[0].button("Export Report", type="primary"):
+            uncertainty_payload = {
+                "conversion_ci_lower": float(selected_metrics["conversion_ci_lower"]),
+                "conversion_ci_upper": float(selected_metrics["conversion_ci_upper"]),
+                "h2_yield_ci_lower": float(selected_metrics["h2_yield_ci_lower"]),
+                "h2_yield_ci_upper": float(selected_metrics["h2_yield_ci_upper"]),
+                "fouling_risk_ci_lower": float(selected_metrics["fouling_risk_ci_lower"]),
+                "fouling_risk_ci_upper": float(selected_metrics["fouling_risk_ci_upper"]),
+            }
+            report_path, _payload = generate_design_report(
+                selected_design,
+                dict(selected_metrics),
+                uncertainty_payload,
+                ood_score=float(selected_metrics["ood_score"]),
+                surrogate_params_path=params_path,
+            )
+            st.session_state["last_design_report_path"] = str(report_path)
+            st.success(f"Report exported: `{report_path}`")
+        if st.session_state.get("last_design_report_path"):
+            report_cols[1].markdown(
+                f"Latest report: `{st.session_state['last_design_report_path']}`"
+            )
 
         candidate_sim = run_simulation(
             hours=hours,

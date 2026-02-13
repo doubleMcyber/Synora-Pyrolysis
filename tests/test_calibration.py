@@ -7,6 +7,7 @@ from synora.calibration.surrogate_fit import (
     calibrated_predict,
     fit_surrogate,
     predict_with_model,
+    predict_with_uncertainty,
     save_surrogate_params,
 )
 
@@ -49,19 +50,22 @@ def _synthetic_dataset() -> pd.DataFrame:
 
 def test_surrogate_calibration_converges() -> None:
     dataset = _synthetic_dataset()
-    model = fit_surrogate(dataset, degree=2)
+    model = fit_surrogate(dataset, degree=2, ensemble_size=6, random_seed=3)
 
     assert model.degree == 2
+    assert model.ensemble_size == 6
     assert model.temperature_std > 0
     assert model.residence_time_std > 0
     for coefficients in model.coefficients.values():
         coeff_array = np.asarray(coefficients, dtype=float)
         assert np.isfinite(coeff_array).all()
+    for target in ("methane_conversion", "h2_yield_mol_per_mol_ch4", "carbon_formation_index"):
+        assert model.rmse_std[target] >= 0
 
 
 def test_surrogate_error_below_threshold(tmp_path) -> None:
     dataset = _synthetic_dataset()
-    model = fit_surrogate(dataset, degree=2)
+    model = fit_surrogate(dataset, degree=2, ensemble_size=1, random_seed=11)
 
     predictions = predict_with_model(
         model,
@@ -102,3 +106,27 @@ def test_surrogate_error_below_threshold(tmp_path) -> None:
     assert 0 <= probe["methane_conversion"] <= 1
     assert 0 <= probe["h2_yield_mol_per_mol_ch4"] <= 2
     assert probe["carbon_formation_index"] >= 0
+
+
+def test_uncertainty_std_non_negative() -> None:
+    dataset = _synthetic_dataset()
+    model = fit_surrogate(dataset, degree=2, ensemble_size=7, random_seed=7)
+
+    pred = predict_with_uncertainty(
+        model,
+        np.array([900.0, 980.0]),
+        np.array([1.2, 2.8]),
+    )
+
+    assert (np.asarray(pred["methane_conversion_std"]) >= 0).all()
+    assert (np.asarray(pred["h2_yield_mol_per_mol_ch4_std"]) >= 0).all()
+    assert (np.asarray(pred["carbon_formation_index_std"]) >= 0).all()
+
+
+def test_ensemble_has_stable_rmse_vs_members() -> None:
+    dataset = _synthetic_dataset()
+    model = fit_surrogate(dataset, degree=2, ensemble_size=8, random_seed=19)
+
+    for target in ("methane_conversion", "h2_yield_mol_per_mol_ch4", "carbon_formation_index"):
+        member_rmses = [member.rmse[target] for member in model.members]
+        assert model.rmse[target] <= np.mean(member_rmses) + 1e-9

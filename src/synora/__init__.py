@@ -6,6 +6,7 @@ from synora.generative.active_learning import run_active_learning
 from synora.generative.design_space import DesignBounds, ReactorDesign
 from synora.generative.objectives import evaluate_design_surrogate
 from synora.generative.optimizer import propose_designs
+from synora.generative.report import generate_design_report
 from synora.reactor.model import (
     ReactorInputs,
     ReactorOutputs,
@@ -34,4 +35,5 @@ __all__ = [
     "evaluate_design_surrogate",
     "propose_designs",
     "run_active_learning",
+    "generate_design_report",
 ]
