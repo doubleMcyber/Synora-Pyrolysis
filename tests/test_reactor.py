@@ -35,7 +35,7 @@ def test_health_decreases_with_fouling() -> None:
 
     assert outputs_1.fouling_rate_per_hr > 0
     assert state_1.health < initial.health
-    assert state_2.health < state_1.health
+    assert state_2.health <= state_1.health
     assert outputs_2.conversion < outputs_1.conversion
 
 

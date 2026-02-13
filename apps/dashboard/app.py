@@ -12,6 +12,9 @@ from synora.calibration.surrogate_fit import (
     load_pfr_dataset,
 )
 from synora.economics.lcoh import EconInputs
+from synora.generative.design_space import ReactorDesign
+from synora.generative.objectives import evaluate_design_surrogate
+from synora.generative.optimizer import evaluations_to_frame, propose_designs
 from synora.twin.simulator import run_simulation
 
 st.set_page_config(page_title="Synora Twin Console", layout="wide")
@@ -175,8 +178,8 @@ if physics_df is None:
 elif params_path is None:
     st.warning("Physics data found, but surrogate params were not generated.")
 
-tab_overview, tab_sensitivity, tab_envelope = st.tabs(
-    ["Reactor Overview", "Sensitivity", "Economic Envelope"]
+tab_overview, tab_sensitivity, tab_envelope, tab_design = st.tabs(
+    ["Reactor Overview", "Sensitivity", "Economic Envelope", "Design Explorer"]
 )
 
 with tab_overview:
@@ -374,3 +377,206 @@ with tab_envelope:
     )
     st.plotly_chart(envelope_fig, width="stretch")
     st.dataframe(envelope_df, width="stretch")
+
+with tab_design:
+    st.subheader("Generative Design Explorer")
+    st.caption(
+        "Evolutionary search on surrogate objectives. Physics labeling remains offline via active learning."
+    )
+
+    control_cols = st.columns(4)
+    top_k = control_cols[0].slider("Top K designs", min_value=5, max_value=40, value=15, step=1)
+    generations = control_cols[1].slider("Generations", min_value=4, max_value=30, value=10, step=1)
+    population = control_cols[2].slider(
+        "Population size", min_value=40, max_value=300, value=120, step=10
+    )
+    optimizer_seed = control_cols[3].number_input(
+        "Optimizer seed", min_value=1, max_value=100000, value=42, step=1
+    )
+
+    constraint_cols = st.columns(4)
+    max_fouling = constraint_cols[0].slider(
+        "Max Fouling Risk Index", min_value=0.05, max_value=1.0, value=0.40, step=0.01
+    )
+    max_dp = constraint_cols[1].slider(
+        "Max pressure-drop proxy", min_value=0.05, max_value=1.0, value=0.35, step=0.01
+    )
+    max_heat_loss = constraint_cols[2].slider(
+        "Max heat-loss proxy", min_value=0.05, max_value=1.0, value=0.40, step=0.01
+    )
+    min_conversion = constraint_cols[3].slider(
+        "Min conversion", min_value=0.0, max_value=0.3, value=0.01, step=0.005
+    )
+
+    if st.button("Run Design Optimization", type="primary"):
+        constraints = {
+            "min_conversion": float(min_conversion),
+            "max_fouling_risk_index": float(max_fouling),
+            "max_pressure_drop_proxy": float(max_dp),
+            "max_heat_loss_proxy": float(max_heat_loss),
+        }
+        evaluations = propose_designs(
+            top_k=int(top_k),
+            generations=int(generations),
+            population_size=int(population),
+            seed=int(optimizer_seed),
+            surrogate_params_path=params_path,
+            econ_inputs=econ_inputs,
+            constraints=constraints,
+        )
+        st.session_state["design_leaderboard"] = evaluations_to_frame(evaluations)
+
+    leaderboard = st.session_state.get("design_leaderboard", pd.DataFrame())
+    if leaderboard.empty:
+        st.info("Run optimization to generate candidate reactor designs.")
+    else:
+        display_columns = [
+            "score",
+            "profit_per_hr",
+            "conversion",
+            "h2_rate",
+            "fouling_risk_index",
+            "pressure_drop_proxy",
+            "heat_loss_proxy",
+            "constraint_violation_count",
+            "temp_c",
+            "residence_time_s",
+            "length_m",
+            "diameter_m",
+            "pressure_atm",
+            "methane_kg_per_hr",
+            "dilution_frac",
+            "carbon_removal_eff",
+        ]
+        available_columns = [column for column in display_columns if column in leaderboard.columns]
+        ranked = leaderboard.sort_values(
+            ["constraint_violation_count", "score"], ascending=[True, False]
+        )
+
+        st.markdown("**Leaderboard**")
+        st.dataframe(ranked[available_columns], width="stretch")
+
+        pareto_cols = st.columns(2)
+        pareto_fig = go.Figure()
+        pareto_fig.add_trace(
+            go.Scatter(
+                x=ranked["fouling_risk_index"],
+                y=ranked["profit_per_hr"],
+                mode="markers",
+                marker=dict(
+                    size=9,
+                    color=ranked["conversion"],
+                    colorscale="Turbo",
+                    colorbar=dict(title="Conversion"),
+                ),
+                text=[f"Design {idx}" for idx in ranked.index],
+                hovertemplate=(
+                    "Fouling risk: %{x:.3f}<br>"
+                    "Profit/hr: %{y:.2f}<br>"
+                    "Conversion: %{marker.color:.3f}<extra></extra>"
+                ),
+                name="Designs",
+            )
+        )
+        pareto_fig.update_layout(
+            template=PLOT_TEMPLATE,
+            title="Pareto: Profit vs Fouling Risk",
+            xaxis_title="Fouling Risk Index",
+            yaxis_title="Profit per hour (USD)",
+        )
+        pareto_cols[0].plotly_chart(pareto_fig, width="stretch")
+
+        pareto_fig_2 = go.Figure()
+        pareto_fig_2.add_trace(
+            go.Scatter(
+                x=ranked["conversion"],
+                y=ranked["profit_per_hr"],
+                mode="markers",
+                marker=dict(size=9, color=ACCENT_BLUE),
+                hovertemplate="Conversion: %{x:.3f}<br>Profit/hr: %{y:.2f}<extra></extra>",
+                name="Designs",
+            )
+        )
+        pareto_fig_2.update_layout(
+            template=PLOT_TEMPLATE,
+            title="Pareto: Profit vs Conversion",
+            xaxis_title="Conversion",
+            yaxis_title="Profit per hour (USD)",
+        )
+        pareto_cols[1].plotly_chart(pareto_fig_2, width="stretch")
+
+        ranked = ranked.reset_index(drop=True)
+        selected_idx = st.selectbox(
+            "Inspect design candidate",
+            options=list(range(len(ranked))),
+            format_func=lambda idx: (
+                f"#{idx + 1} score={ranked.loc[idx, 'score']:.2f}, "
+                f"profit={ranked.loc[idx, 'profit_per_hr']:.2f}, "
+                f"fouling={ranked.loc[idx, 'fouling_risk_index']:.3f}"
+            ),
+        )
+        selected = ranked.loc[selected_idx]
+        selected_design = ReactorDesign(
+            length_m=float(selected["length_m"]),
+            diameter_m=float(selected["diameter_m"]),
+            pressure_atm=float(selected["pressure_atm"]),
+            temp_c=float(selected["temp_c"]),
+            methane_kg_per_hr=float(selected["methane_kg_per_hr"]),
+            dilution_frac=float(selected["dilution_frac"]),
+            carbon_removal_eff=float(selected["carbon_removal_eff"]),
+            wall_thickness_m=float(selected["wall_thickness_m"]),
+            emissivity=float(selected["emissivity"]),
+            roughness_mm=float(selected["roughness_mm"]),
+        )
+        selected_metrics = evaluate_design_surrogate(
+            selected_design,
+            surrogate_params_path=params_path,
+            econ_inputs=econ_inputs,
+        )
+        detail_cols = st.columns(4)
+        detail_cols[0].metric(
+            "Selected Profit/hr (USD)", f"{float(selected_metrics['profit_per_hr']):.2f}"
+        )
+        detail_cols[1].metric("Selected Conversion", f"{float(selected_metrics['conversion']):.3f}")
+        detail_cols[2].metric(
+            "Fouling Risk Index", f"{float(selected_metrics['fouling_risk_index']):.3f}"
+        )
+        detail_cols[3].metric("Residence Time (s)", f"{selected_design.residence_time_s:.2f}")
+
+        candidate_sim = run_simulation(
+            hours=hours,
+            methane_kg_per_hr=selected_design.methane_kg_per_hr,
+            temp=selected_design.temp_c,
+            residence_time_s=selected_design.residence_time_s,
+            econ_inputs=econ_inputs,
+            maintenance_interval_hr=int(maintenance_interval_hr),
+            surrogate_params_path=params_path,
+        )
+        sim_fig = go.Figure()
+        sim_fig.add_trace(
+            go.Scatter(
+                x=candidate_sim["time_hr"],
+                y=candidate_sim["profit_per_hr"],
+                mode="lines",
+                name="Profit/hr",
+                line=dict(color=ACCENT_GREEN, width=2.2),
+            )
+        )
+        sim_fig.add_trace(
+            go.Scatter(
+                x=candidate_sim["time_hr"],
+                y=candidate_sim["health"],
+                mode="lines",
+                name="Health",
+                line=dict(color=ACCENT_PURPLE, width=2.2, dash="dot"),
+                yaxis="y2",
+            )
+        )
+        sim_fig.update_layout(
+            template=PLOT_TEMPLATE,
+            title="Selected Candidate: Profit and Health Over Time",
+            xaxis_title="Time (hr)",
+            yaxis=dict(title="Profit/hr (USD)"),
+            yaxis2=dict(title="Health", overlaying="y", side="right"),
+        )
+        st.plotly_chart(sim_fig, width="stretch")
