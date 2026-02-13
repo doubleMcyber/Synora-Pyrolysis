@@ -1,0 +1,25 @@
+[project]
+name = "synora"
+version = "0.1.0"
+description = "Digital twin + optimization platform for distributed methane pyrolysis hydrogen networks."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "pandas",
+  "scipy",
+  "pydantic",
+  "streamlit",
+  "plotly",
+  "pulp"
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

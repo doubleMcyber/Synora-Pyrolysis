@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: synora
+Version: 0.1.0
+Summary: Digital twin + optimization platform for distributed methane pyrolysis hydrogen networks.
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: scipy
+Requires-Dist: pydantic
+Requires-Dist: streamlit
+Requires-Dist: plotly
+Requires-Dist: pulp
+
+# Synora-Pyrolysis
+Physics-informed digital twin platform for distributed methane pyrolysis hydrogen production, integrating reactor simulation, economic modeling, and network optimization into a virtual hydrogen plant.
