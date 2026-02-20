@@ -97,7 +97,7 @@ def test_out_of_distribution_design_is_flagged() -> None:
     assert "out_of_distribution" in metrics["constraint_violations"]
 
 
-def test_optimizer_returns_top_k_and_feasible_designs() -> None:
+def test_optimizer_returns_top_k_and_feasible_designs(tmp_path) -> None:
     constraints = {
         "min_conversion": 0.0,
         "max_fouling_risk_index": 1.0,
@@ -110,6 +110,7 @@ def test_optimizer_returns_top_k_and_feasible_designs() -> None:
         population_size=60,
         seed=7,
         constraints=constraints,
+        surrogate_params_path=tmp_path / "missing_surrogate_params.json",
     )
 
     assert len(proposals) == 6

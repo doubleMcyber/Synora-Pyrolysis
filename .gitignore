@@ -41,3 +41,6 @@ data/processed/*
 # Streamlit
 .streamlit/
 
+
+# External raw datasets (do not commit)
+data/raw/external/

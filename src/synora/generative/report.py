@@ -7,6 +7,7 @@ from typing import Any
 
 from synora.calibration.surrogate_fit import DEFAULT_PARAMS_PATH, load_surrogate_params
 from synora.generative.design_space import ReactorDesign
+from synora.generative.multizone import MultiZoneDesign
 from synora.physics.label_pfr import DEFAULT_MECHANISM_PATH
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -44,8 +45,14 @@ def _surrogate_rmse_summary(params_path: str | Path | None) -> dict[str, Any]:
     }
 
 
+def _serialize_design_payload(design: ReactorDesign | MultiZoneDesign) -> dict[str, Any]:
+    payload = design.to_dict()
+    payload["design_type"] = "multizone" if isinstance(design, MultiZoneDesign) else "single_zone"
+    return payload
+
+
 def generate_design_report(
-    design: ReactorDesign,
+    design: ReactorDesign | MultiZoneDesign,
     metrics: dict[str, Any],
     uncertainty: dict[str, float],
     ood_score: float,
@@ -60,7 +67,7 @@ def generate_design_report(
 
     payload: dict[str, Any] = {
         "timestamp_utc": timestamp,
-        "design": design.to_dict(),
+        "design": _serialize_design_payload(design),
         "performance_metrics": metrics,
         "fouling_index": metrics.get("fouling_risk_index"),
         "profit_per_hr": metrics.get("profit_per_hr"),

@@ -96,6 +96,37 @@ Tests:
 
 ---
 
+## Layer 6 — Multi-Zone Architecture + Thermal/DeltaP Constraints (Sprint 3)
+Acceptance:
+1. Multi-zone schema exists:
+   - `ZoneDesign`
+   - `MultiZoneDesign`
+   - supports 2-3 zones and derived per-zone residence times from geometry + flow
+2. Multi-zone surrogate objective evaluation returns:
+   - overall conversion/H2/fouling metrics
+   - zone-wise conversion + confidence fields
+   - aggregated OOD status/score
+3. Thermal and pressure-drop constraints are enforced via proxy models:
+   - `dp_total_kpa`
+   - `q_loss_kw`
+   - `q_required_kw`
+   - violation reasons for material/power/DeltaP limits
+4. Multi-zone optimizer returns top-K candidates and prioritizes feasible designs.
+5. Dashboard includes `Reactor Architecture` tab with:
+   - single-zone vs multi-zone toggle
+   - zone profile + uncertainty display
+   - multi-zone physics verify flow
+   - report export including zone/constraint context
+
+Tests:
+- Geometry change updates derived zone residence time
+- Multi-zone objective keys/non-negative checks
+- Material/DeltaP/power limit violations trigger correctly
+- Multi-zone optimizer top-K with feasibility-prioritized ordering
+- Import contracts include multi-zone APIs
+
+---
+
 # Minimum Passing Criteria Across All Layers
 - `ruff check .` passes
 - `pytest -q` passes

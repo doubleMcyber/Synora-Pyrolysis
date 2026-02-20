@@ -62,6 +62,9 @@ class ReactorOutputs:
     carbon_formation_index: float
     h2_yield_mol_per_mol_ch4: float
     unreacted_methane_kg_per_hr: float
+    methane_conversion_std: float = 0.0
+    is_out_of_distribution: bool = False
+    ood_score: float = 0.0
 
     def __post_init__(self) -> None:
         if self.h2_kg_per_hr < 0:
@@ -84,6 +87,12 @@ class ReactorOutputs:
             raise ValueError(msg)
         if self.h2_yield_mol_per_mol_ch4 < 0:
             msg = "h2_yield_mol_per_mol_ch4 must be non-negative"
+            raise ValueError(msg)
+        if self.methane_conversion_std < 0:
+            msg = "methane_conversion_std must be non-negative"
+            raise ValueError(msg)
+        if self.ood_score < 0:
+            msg = "ood_score must be non-negative"
             raise ValueError(msg)
         if not 0 <= self.conversion <= 1:
             msg = "conversion must be between 0 and 1"
@@ -110,7 +119,17 @@ def simulate_step(
     )
     base_conversion = _clamp(float(surrogate["methane_conversion"]), 0.0, inputs.max_conversion)
     h2_yield = _clamp(float(surrogate["h2_yield_mol_per_mol_ch4"]), 0.0, 2.0)
-    carbon_proxy = max(0.0, float(surrogate["carbon_formation_index"]))
+    conversion_std = max(0.0, float(surrogate.get("methane_conversion_std", 0.0)))
+    carbon_proxy_raw = max(0.0, float(surrogate["carbon_formation_index"]))
+    # Surrogate carbon index can exceed 1 outside calibration; normalize to keep
+    # degradation dynamics realistic and avoid instant health collapse.
+    carbon_proxy = _clamp(
+        carbon_proxy_raw / (1.0 + carbon_proxy_raw),
+        0.0,
+        1.0,
+    )
+    is_ood = bool(surrogate.get("is_out_of_distribution", False))
+    ood_score = max(0.0, float(surrogate.get("ood_score", 0.0)))
 
     # Health multiplies effective performance so conversion drops as the asset fouls.
     effective_conversion = _clamp(base_conversion * state.health, 0.0, inputs.max_conversion)
@@ -126,8 +145,8 @@ def simulate_step(
 
     carbon_rate_kg_per_hr = carbon_kg_per_hr * carbon_proxy
     feed_for_scaling = max(inputs.methane_kg_per_hr, 1e-9)
-    fouling_rate_per_hr = (0.05 * carbon_proxy) + (
-        0.15 * (carbon_rate_kg_per_hr / feed_for_scaling)
+    fouling_rate_per_hr = (0.004 * carbon_proxy) + (
+        0.012 * (carbon_rate_kg_per_hr / feed_for_scaling)
     )
 
     unreacted_methane_kg_per_hr = max(0.0, inputs.methane_kg_per_hr - methane_reacted)
@@ -149,6 +168,9 @@ def simulate_step(
         carbon_formation_index=carbon_proxy,
         h2_yield_mol_per_mol_ch4=h2_yield,
         unreacted_methane_kg_per_hr=unreacted_methane_kg_per_hr,
+        methane_conversion_std=conversion_std,
+        is_out_of_distribution=is_ood,
+        ood_score=ood_score,
     )
     return next_state, outputs
 

@@ -65,16 +65,31 @@ Constraints:
 Purpose: LEAP-71-inspired parametric design exploration with active learning.
 Public API:
 from synora.generative.design_space import ReactorDesign, DesignBounds
+from synora.generative.multizone import ZoneDesign, MultiZoneDesign, MultiZoneBounds
 from synora.generative.objectives import evaluate_design_surrogate
+from synora.generative.objectives import evaluate_multizone_surrogate
 from synora.generative.optimizer import propose_designs
+from synora.generative.optimizer import propose_multizone_designs
 from synora.generative.active_learning import run_active_learning
 from synora.generative.report import generate_design_report
 
 Contracts:
 - Design evaluation uses surrogate and analytic proxies only.
+- Multi-zone evaluation runs zones sequentially and aggregates conversion/yield with documented approximations.
+- Thermal and pressure-drop checks use fast CFD-lite proxies (Darcy/UA/energy balance style), not CFD solvers.
 - Optimizer returns deterministic results for a fixed seed.
 - Active learning performs: propose -> physics label -> append -> refit.
 - Design report generation exports JSON artifacts for decision traceability.
+
+### src/synora/generative/constraints.py
+Purpose: Thermal and pressure-drop proxy models for feasibility checks.
+Public API:
+from synora.generative.constraints import evaluate_thermal_dp_constraints
+
+Contracts:
+- Evaluates `dp_total_kpa`, `q_loss_kw`, and `q_required_kw` with lightweight proxies.
+- Flags hard limits: `material_tmax_c`, `dp_max_kpa`, and `power_max_kw`.
+- Executes in sub-second candidate loops.
 
 ### scripts/physics/generate_pfr_dataset.py
 Purpose: Batch physics label generation for calibration datasets.
@@ -99,6 +114,14 @@ dataset -> fit -> propose -> label -> refit
 3. `synora.generative.optimizer.propose_designs` explores design space with surrogate objectives.
 4. `synora.physics.label_pfr` verifies selected candidates with physics.
 5. `synora.generative.active_learning.run_active_learning` appends labels and refits surrogate.
+
+## Multi-Zone Evaluation Flow (Sprint 3)
+
+1. Build `MultiZoneDesign` with 2-3 serial zones and global feed/limits.
+2. Derive per-zone residence times from geometry + flow (no direct tau inputs).
+3. Evaluate each zone with `calibrated_predict(temp, tau)` and aggregate outcomes.
+4. Evaluate thermal/DeltaP constraints with `synora.generative.constraints`.
+5. Optimize with `propose_multizone_designs` under objective and feasibility penalties.
 
 ## Units
 - Mass: kg
