@@ -32,11 +32,18 @@ htmlcov/
 # Logs
 *.log
 
-# Data folders (adjust if needed later)
+# Data folders
 data/raw/*
 data/processed/*
+
+# Keep structure
 !data/raw/.gitkeep
+!data/processed/
 !data/processed/.gitkeep
+
+# Allow physics overlays (Option 2)
+!data/processed/physics_runs/
+!data/processed/physics_runs/**
 
 # Streamlit
 .streamlit/
