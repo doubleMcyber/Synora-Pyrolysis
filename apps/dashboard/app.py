@@ -69,9 +69,6 @@ st.markdown(
     color: #d9e6f8;
     font-family: "Inter", "IBM Plex Sans", "Roboto", sans-serif;
 }
-[data-testid="stAppViewContainer"] * {
-    font-family: "Inter", "IBM Plex Sans", "Roboto", sans-serif;
-}
 [data-testid="stSidebar"] {
     background-color: #0c131f;
     border-right: 1px solid #1f2a3f;

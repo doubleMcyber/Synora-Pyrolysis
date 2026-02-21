@@ -102,18 +102,19 @@ class PFRLabeler:
         network = self._ct.ReactorNet([reactor])
 
         n_total_in = reactor.mass / self._gas.mean_molecular_weight
-        x_ch4_in = float(self._gas["CH4"].X[0])
+        idx_ch4 = self._gas.species_index("CH4")
+        x_ch4_in = float(self._gas.X[idx_ch4])
         n_ch4_in = max(1e-18, x_ch4_in * n_total_in)
 
         network.advance(residence_time_s)
         gas_out = reactor.phase
 
         n_total_out = reactor.mass / gas_out.mean_molecular_weight
-        x_ch4 = float(gas_out["CH4"].X[0])
-        x_h2 = float(gas_out["H2"].X[0])
-        x_c2h2 = float(gas_out["C2H2"].X[0])
-        x_c2h4 = float(gas_out["C2H4"].X[0])
-        x_c2h6 = float(gas_out["C2H6"].X[0])
+        x_ch4 = float(gas_out.X[gas_out.species_index("CH4")])
+        x_h2 = float(gas_out.X[gas_out.species_index("H2")])
+        x_c2h2 = float(gas_out.X[gas_out.species_index("C2H2")])
+        x_c2h4 = float(gas_out.X[gas_out.species_index("C2H4")])
+        x_c2h6 = float(gas_out.X[gas_out.species_index("C2H6")])
 
         n_ch4_out = x_ch4 * n_total_out
         n_h2_out = x_h2 * n_total_out
