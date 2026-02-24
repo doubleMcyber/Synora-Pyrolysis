@@ -1,0 +1,3 @@
+[theme]
+# Default app theme to "dark" instead of "Use system setting".
+base = "dark"

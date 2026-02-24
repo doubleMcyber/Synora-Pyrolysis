@@ -45,8 +45,12 @@ data/processed/*
 !data/processed/physics_runs/
 !data/processed/physics_runs/**
 
-# Streamlit
-.streamlit/
+# Streamlit (config.toml is committed for theme defaults)
+.streamlit/*
+!.streamlit/config.toml
+apps/dashboard/.streamlit/
+!apps/dashboard/.streamlit/
+!apps/dashboard/.streamlit/config.toml
 
 
 # External raw datasets (do not commit)
