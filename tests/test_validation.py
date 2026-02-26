@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from synora.validation.experimental import (
     DEFAULT_EXPERIMENTAL_DATASET_PATH,
     load_cv_reactor_experiment,
@@ -8,7 +10,8 @@ from synora.validation.metrics import compare_experiment_to_surrogate
 
 
 def test_load_cv_reactor_experiment_returns_expected_columns() -> None:
-    assert DEFAULT_EXPERIMENTAL_DATASET_PATH.exists()
+    if not DEFAULT_EXPERIMENTAL_DATASET_PATH.exists():
+        pytest.skip("Experimental dataset not available (data/processed/experimental/)")
     df = load_cv_reactor_experiment()
 
     expected_columns = {
@@ -30,6 +33,8 @@ def test_load_cv_reactor_experiment_returns_expected_columns() -> None:
 
 
 def test_compare_experiment_to_surrogate_returns_overlay_and_metrics() -> None:
+    if not DEFAULT_EXPERIMENTAL_DATASET_PATH.exists():
+        pytest.skip("Experimental dataset not available (data/processed/experimental/)")
     df_exp = load_cv_reactor_experiment().head(25).copy()
     overlay, metrics = compare_experiment_to_surrogate(df_exp)
 
