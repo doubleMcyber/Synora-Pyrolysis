@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import threading
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,7 +22,34 @@ TARGET_COLUMNS = (
 )
 FORMAT_VERSION = 2
 
+# Upper bound on the normalized Mahalanobis OOD term so a degenerate training
+# covariance cannot produce an unbounded out-of-distribution score.
+_MAX_NORMALIZED_MAHALANOBIS = 6.0
+# Upper bound on the final OOD score. A degenerate (near-zero) feature span makes the
+# bounding-box distance explode (it divides by the training range), so cap the score to
+# keep it finite and comparable; anything >> 1 is already firmly out-of-distribution.
+_MAX_OOD_SCORE = 10.0
+
+# Process-global surrogate cache, bounded and lock-guarded (load/save can run from
+# multiple Streamlit threads). Entries are (file_mtime, model); oldest evicted first.
 _MODEL_CACHE: dict[str, tuple[float, SurrogateModel]] = {}
+_MODEL_CACHE_LOCK = threading.Lock()
+_MODEL_CACHE_MAX_ENTRIES = 32
+
+
+def _cache_get(cache_key: str, mtime: float) -> SurrogateModel | None:
+    with _MODEL_CACHE_LOCK:
+        cached = _MODEL_CACHE.get(cache_key)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
+    return None
+
+
+def _cache_store(cache_key: str, mtime: float, model: SurrogateModel) -> None:
+    with _MODEL_CACHE_LOCK:
+        _MODEL_CACHE[cache_key] = (mtime, model)
+        while len(_MODEL_CACHE) > _MODEL_CACHE_MAX_ENTRIES:
+            del _MODEL_CACHE[next(iter(_MODEL_CACHE))]
 
 
 @dataclass(frozen=True)
@@ -216,7 +245,12 @@ def _training_stats(
     }
     features = np.column_stack([temperature, residence_time])
     cov = np.cov(features.T, ddof=0)
-    cov += np.eye(2) * 1e-9
+    # Regularize with a per-axis ridge scaled to each feature's own variance. A fixed
+    # tiny absolute ridge is negligible for a high-variance axis but lets a
+    # near-zero-variance (collinear/degenerate) axis produce an enormous inverse and a
+    # meaningless Mahalanobis distance. Scaling to variance keeps the ridge proportionate.
+    ridge = np.maximum(np.diag(cov) * 1e-6, 1e-9)
+    cov = cov + np.diag(ridge)
     cov_inv = np.linalg.pinv(cov)
     return feature_bounds, feature_mean, cov_inv.astype(float).tolist()
 
@@ -264,6 +298,19 @@ def fit_surrogate(
 
     cleaned = _validate_dataset(dataset)
     n_rows = len(cleaned)
+    # Avoid an underdetermined (garbage) fit: lower the polynomial degree until the term
+    # count fits the available rows; fail only if even a degree-1 fit is impossible.
+    while degree > 1 and _poly_features(np.zeros(1), np.zeros(1), degree).shape[1] > n_rows:
+        warnings.warn(
+            f"Reducing surrogate degree {degree} -> {degree - 1}: {n_rows} rows is too few "
+            f"for degree {degree}.",
+            stacklevel=2,
+        )
+        degree -= 1
+    min_terms = _poly_features(np.zeros(1), np.zeros(1), degree).shape[1]
+    if n_rows < min_terms:
+        msg = f"Too few rows ({n_rows}) to fit a degree-{degree} surrogate (need >= {min_terms})."
+        raise ValueError(msg)
     temperature = cleaned["temperature_c"].to_numpy(dtype=float)
     residence_time = cleaned["residence_time_s"].to_numpy(dtype=float)
     t_mean, t_std = _safe_scale(temperature)
@@ -444,10 +491,13 @@ def _ood_metrics(
     )
     cov_inv = np.asarray(model.feature_cov_inv, dtype=float)
     delta = np.column_stack([temp, tau]) - mean_vec
-    mahal = np.sqrt(np.sum((delta @ cov_inv) * delta, axis=1))
+    mahal = np.sqrt(np.maximum(0.0, np.sum((delta @ cov_inv) * delta, axis=1)))
     normalized_mahal = mahal / max(model.ood_mahalanobis_threshold, 1e-9)
+    # Cap the Mahalanobis term so a near-degenerate training covariance cannot flag
+    # everything as wildly out-of-distribution; the bbox distance still grows unbounded.
+    normalized_mahal = np.minimum(normalized_mahal, _MAX_NORMALIZED_MAHALANOBIS)
 
-    ood_score = np.maximum(bbox_distance, normalized_mahal)
+    ood_score = np.minimum(np.maximum(bbox_distance, normalized_mahal), _MAX_OOD_SCORE)
     is_ood = ood_score > 1.0
     if scalar_output:
         return bool(is_ood[0]), float(ood_score[0])
@@ -478,7 +528,7 @@ def save_surrogate_params(
     path = Path(params_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(model.to_dict(), indent=2), encoding="utf-8")
-    _MODEL_CACHE[str(path.resolve())] = (path.stat().st_mtime, model)
+    _cache_store(str(path.resolve()), path.stat().st_mtime, model)
     return path
 
 
@@ -490,13 +540,13 @@ def load_surrogate_params(params_path: str | Path = DEFAULT_PARAMS_PATH) -> Surr
 
     cache_key = str(path.resolve())
     mtime = path.stat().st_mtime
-    cached = _MODEL_CACHE.get(cache_key)
-    if cached is not None and cached[0] == mtime:
-        return cached[1]
+    cached = _cache_get(cache_key, mtime)
+    if cached is not None:
+        return cached
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     model = SurrogateModel.from_dict(payload)
-    _MODEL_CACHE[cache_key] = (mtime, model)
+    _cache_store(cache_key, mtime, model)
     return model
 
 
