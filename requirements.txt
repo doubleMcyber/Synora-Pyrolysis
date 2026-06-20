@@ -1,0 +1,5 @@
+# Streamlit Community Cloud installs from this file.
+# Installing the repo itself ("-e .") pulls the `synora` package plus its runtime
+# dependencies (numpy, pandas, pyarrow, streamlit, plotly) from pyproject.toml, so the
+# dashboard's `from synora ...` imports resolve in the cloud. Keep deps in pyproject.toml.
+-e .
