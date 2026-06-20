@@ -57,9 +57,12 @@ def generate_pfr_dataset(
         pd.DataFrame(rows).sort_values(["temperature_c", "residence_time_s"]).reset_index(drop=True)
     )
 
-    timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
+    # Microsecond precision avoids filename collisions for runs in the same second;
+    # pressure/dilution in the name distinguish parameter sweeps.
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%S_%fZ")
     output_path = output_dir / (
-        f"pfr_dataset_{timestamp}_{n_temperature_points}x{n_residence_points}.parquet"
+        f"pfr_dataset_{timestamp}_{n_temperature_points}x{n_residence_points}"
+        f"_p{pressure_atm:g}_d{dilution_frac:g}.parquet"
     )
     df.to_parquet(output_path, index=False)
 

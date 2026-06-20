@@ -5,9 +5,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-RAW_CSV = Path("data/raw/experimental/methane_cv_reactor.csv")
-OUT_DIR = Path("data/processed/experimental")
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+RAW_CSV = PROJECT_ROOT / "data" / "raw" / "experimental" / "methane_cv_reactor.csv"
+OUT_DIR = PROJECT_ROOT / "data" / "processed" / "experimental"
 
 
 def _clean_numeric(x):
@@ -97,6 +97,7 @@ def main() -> None:
         df["initial_pressure_kpa"] = 399.0
 
     # Save
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     t1_path = OUT_DIR / "cv_reactor_table1_measured.parquet"
     t2_path = OUT_DIR / "cv_reactor_table2_normalized.parquet"
 
