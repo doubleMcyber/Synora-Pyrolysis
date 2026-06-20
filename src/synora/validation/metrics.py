@@ -51,9 +51,17 @@ def compare_experiment_to_surrogate(
 
     earliest_time_s = float(df_exp["time_s"].min())
     baseline_rows = df_exp[df_exp["time_s"] == earliest_time_s]
-    methane_baseline = float(baseline_rows["methane_mole_fraction"].max())
-    hydrogen_baseline = float(baseline_rows["hydrogen_mole_fraction"].max())
-    helium_baseline = float(baseline_rows["helium_mole_fraction"].max())
+    # Use a single, internally consistent inlet sample (least-reacted = most methane)
+    # rather than per-column maxima, which would mix different physical rows.
+    inlet_row = baseline_rows.loc[baseline_rows["methane_mole_fraction"].idxmax()]
+
+    def _baseline(column: str) -> float:
+        value = float(inlet_row[column])
+        return 0.0 if np.isnan(value) else value
+
+    methane_baseline = _baseline("methane_mole_fraction")
+    hydrogen_baseline = _baseline("hydrogen_mole_fraction")
+    helium_baseline = _baseline("helium_mole_fraction")
 
     rows: list[dict[str, float | bool]] = []
     for _, row in df_exp.sort_values("time_s").iterrows():
