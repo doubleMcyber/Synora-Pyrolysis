@@ -20,6 +20,8 @@ from synora.calibration.surrogate_fit import (
     calibrated_predict,
     latest_physics_dataset,
     load_pfr_dataset,
+    load_surrogate_params,
+    predict_with_uncertainty,
 )
 from synora.economics.lcoh import EconInputs
 from synora.generative.design_space import ReactorDesign
@@ -235,26 +237,6 @@ def _ensure_calibrated_params() -> str | None:
         return str(DEFAULT_PARAMS_PATH)
     except FileNotFoundError:
         return None
-
-
-def _predict_frame(
-    temperatures_c: np.ndarray, residence_time_s: float, params_path: str | None
-) -> pd.DataFrame:
-    rows: list[dict[str, float]] = []
-    for temp_c in temperatures_c:
-        pred = calibrated_predict(float(temp_c), residence_time_s, params_path=params_path)
-        rows.append(
-            {
-                "temperature_c": float(temp_c),
-                "methane_conversion": pred["methane_conversion"],
-                "methane_conversion_std": pred.get("methane_conversion_std", 0.0),
-                "h2_yield_mol_per_mol_ch4": pred["h2_yield_mol_per_mol_ch4"],
-                "h2_yield_std": pred.get("h2_yield_mol_per_mol_ch4_std", 0.0),
-                "carbon_formation_index": pred["carbon_formation_index"],
-                "carbon_formation_index_std": pred.get("carbon_formation_index_std", 0.0),
-            }
-        )
-    return pd.DataFrame(rows)
 
 
 @st.cache_data(show_spinner=False)
@@ -579,7 +561,20 @@ def _render_design_explorer_hero(
             }
         )
 
-    ordered = hero_df.sort_values("fouling_risk_index")
+    # True non-dominated (Pareto) frontier: minimize fouling, maximize profit.
+    # Walk points by ascending fouling and keep only those that improve on the best
+    # profit seen so far (a standard skyline filter).
+    _pareto_sorted = hero_df.sort_values(
+        ["fouling_risk_index", "annual_profit_usd"], ascending=[True, False]
+    )
+    _running_max_profit = -np.inf
+    _on_frontier: list[bool] = []
+    for _profit in _pareto_sorted["annual_profit_usd"].astype(float):
+        keep = _profit > _running_max_profit
+        _on_frontier.append(keep)
+        if keep:
+            _running_max_profit = _profit
+    ordered = _pareto_sorted[_on_frontier]
     ood_avg = float(hero_df["ood_score"].astype(float).mean())
     mae_value = (
         float(validation_snapshot["mae_conversion"])
@@ -695,7 +690,7 @@ def _render_design_explorer_hero(
         kpi_specs = [
             ("OOD AVG", f"{ood_avg:.2f}", "Out-of-distribution"),
             ("MAE", f"{mae_value:.2f}", "Prediction error"),
-            ("BIAS", f"{bias_value:.2f}", "Profit bias ($k)"),
+            ("PROFIT SPREAD", f"{bias_value:.2f}", "Profit dispersion (MAD, $k)"),
         ]
         for col, (title, value, subtitle) in zip(kpi_cols, kpi_specs, strict=True):
             with col.container(border=True):
@@ -761,17 +756,6 @@ physics_df = _load_latest_physics_dataset()
 experimental_df = _load_experimental_dataset()
 params_path = _ensure_calibrated_params()
 validation_snapshot = _validation_metric_snapshot(params_path)
-
-results = run_simulation(
-    hours=hours,
-    methane_kg_per_hr=float(methane_kg_per_hr),
-    temp=float(temp_c),
-    residence_time_s=float(residence_time_s),
-    econ_inputs=econ_inputs,
-    maintenance_interval_hr=int(maintenance_interval_hr),
-    surrogate_params_path=params_path,
-)
-latest = results.iloc[-1]
 
 st.title("Synora Industrial Digital Twin")
 st.caption("Methane pyrolysis control room with simulation, optimization, and validation overlays.")
@@ -907,13 +891,7 @@ with tab_overview:
                 key="control_fixed_opex",
             )
 
-    control_econ = EconInputs(
-        methane_price_usd_per_kg=float(st.session_state["control_methane_price"]),
-        hydrogen_price_usd_per_kg=float(st.session_state["control_hydrogen_price"]),
-        carbon_price_usd_per_kg=float(st.session_state["control_carbon_price"]),
-        variable_opex_usd_per_hr=float(st.session_state["control_variable_opex"]),
-        fixed_opex_usd_per_hr=float(st.session_state["control_fixed_opex"]),
-    )
+    # Reuse the single module-level econ_inputs (built from the same control_* inputs).
     control_hours = int(st.session_state["control_hours"])
     control_zone_count = int(st.session_state["control_zone_count"])
     simulation_context = build_simulation_context(
@@ -921,7 +899,7 @@ with tab_overview:
         methane_kg_per_hr=float(st.session_state["control_methane_kg_per_hr"]),
         temp=float(st.session_state["control_temp_c"]),
         residence_time_s=float(st.session_state["control_residence_time_s"]),
-        econ_inputs=control_econ,
+        econ_inputs=econ_inputs,
         maintenance_interval_hr=int(st.session_state["control_maintenance_interval_hr"]),
         surrogate_params_path=params_path,
         ticks_per_hour=int(st.session_state["control_ticks_per_hour"]),
@@ -1166,7 +1144,7 @@ with tab_overview:
             methane_kg_per_hr=float(st.session_state["control_methane_kg_per_hr"]),
             temp_c=float(st.session_state["control_temp_c"]),
             residence_time_s=float(st.session_state["control_residence_time_s"]),
-            econ_inputs=control_econ,
+            econ_inputs=econ_inputs,
             params_path=params_path,
         )
         profit_fig = go.Figure()
@@ -1218,14 +1196,38 @@ with tab_overview:
             else:
                 st.caption("PDF summary export is optional; install `fpdf2` to enable.")
 
+
+@st.cache_data(show_spinner=False)
+def _sensitivity_conversion_grid(
+    params_path: str | None, *, resolution: int = 35
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Conversion over a (temperature, residence-time) grid.
+
+    Cached and vectorized: one batched predict_with_uncertainty call instead of
+    resolution**2 scalar calibrated_predict calls on every rerun.
+    """
+    temperatures_c = np.linspace(850.0, 1100.0, resolution)
+    taus_s = np.linspace(0.1, 5.0, resolution)
+    temp_mesh, tau_mesh = np.meshgrid(temperatures_c, taus_s)
+    try:
+        model = load_surrogate_params(DEFAULT_PARAMS_PATH if params_path is None else params_path)
+        pred = predict_with_uncertainty(model, temp_mesh.ravel(), tau_mesh.ravel())
+        z_matrix = np.asarray(pred["methane_conversion"], dtype=float).reshape(temp_mesh.shape)
+    except FileNotFoundError:
+        z_matrix = np.array(
+            [
+                calibrated_predict(float(t), float(s), params_path=params_path)[
+                    "methane_conversion"
+                ]
+                for t, s in zip(temp_mesh.ravel(), tau_mesh.ravel(), strict=True)
+            ],
+            dtype=float,
+        ).reshape(temp_mesh.shape)
+    return temperatures_c, taus_s, z_matrix
+
+
 with tab_sensitivity:
-    temperatures_c = np.linspace(850.0, 1100.0, 35)
-    taus_s = np.linspace(0.1, 5.0, 35)
-    z_matrix = np.zeros((len(taus_s), len(temperatures_c)))
-    for tau_idx, tau in enumerate(taus_s):
-        for temp_idx, temp in enumerate(temperatures_c):
-            pred = calibrated_predict(float(temp), float(tau), params_path=params_path)
-            z_matrix[tau_idx, temp_idx] = pred["methane_conversion"]
+    temperatures_c, taus_s, z_matrix = _sensitivity_conversion_grid(params_path)
 
     heatmap_fig = go.Figure(
         data=go.Heatmap(
@@ -1564,6 +1566,9 @@ with tab_design:
                                 random_seed=42,
                                 verbose=False,
                             )
+                            # Refit changed surrogate_params.json; drop cached snapshots/grids
+                            # so the dashboard reflects the new model without a restart.
+                            st.cache_data.clear()
                             st.success("Surrogate refit completed from updated dataset.")
                 except Exception as exc:  # noqa: BLE001
                     st.error(f"Physics verification failed: {exc}")
@@ -2024,6 +2029,9 @@ with tab_architecture:
                                 random_seed=42,
                                 verbose=False,
                             )
+                            # Refit changed surrogate_params.json; drop cached snapshots/grids
+                            # so the dashboard reflects the new model without a restart.
+                            st.cache_data.clear()
                             st.success("Surrogate refit completed from architecture labels.")
             except Exception as exc:  # noqa: BLE001
                 st.error(f"Architecture verification failed: {exc}")
