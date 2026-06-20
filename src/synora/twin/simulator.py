@@ -337,7 +337,7 @@ def run_simulation(
         rows.append(row)
 
     df = pd.DataFrame(rows)
-    df["cum_profit_usd"] = df["profit_per_hr"].cumsum()
+    df["cum_profit_usd"] = (df["profit_per_hr"] * dt_hr).cumsum()
     return df
 
 

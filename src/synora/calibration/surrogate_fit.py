@@ -20,7 +20,7 @@ TARGET_COLUMNS = (
 )
 FORMAT_VERSION = 2
 
-_MODEL_CACHE: dict[str, SurrogateModel] = {}
+_MODEL_CACHE: dict[str, tuple[float, SurrogateModel]] = {}
 
 
 @dataclass(frozen=True)
@@ -478,7 +478,7 @@ def save_surrogate_params(
     path = Path(params_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(model.to_dict(), indent=2), encoding="utf-8")
-    _MODEL_CACHE[str(path.resolve())] = model
+    _MODEL_CACHE[str(path.resolve())] = (path.stat().st_mtime, model)
     return path
 
 
@@ -489,12 +489,14 @@ def load_surrogate_params(params_path: str | Path = DEFAULT_PARAMS_PATH) -> Surr
         raise FileNotFoundError(msg)
 
     cache_key = str(path.resolve())
-    if cache_key in _MODEL_CACHE:
-        return _MODEL_CACHE[cache_key]
+    mtime = path.stat().st_mtime
+    cached = _MODEL_CACHE.get(cache_key)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     model = SurrogateModel.from_dict(payload)
-    _MODEL_CACHE[cache_key] = model
+    _MODEL_CACHE[cache_key] = (mtime, model)
     return model
 
 

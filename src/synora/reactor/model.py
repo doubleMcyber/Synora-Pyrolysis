@@ -141,7 +141,7 @@ def simulate_step(
     if CH4_MW_KG_PER_MOL > 0:
         methane_mol_per_hr = inputs.methane_kg_per_hr / CH4_MW_KG_PER_MOL
     h2_kg_per_hr = methane_mol_per_hr * h2_yield * state.health * H2_MW_KG_PER_MOL
-    h2_kg_per_hr = min(h2_kg_per_hr, methane_reacted * 0.25)
+    h2_kg_per_hr = min(h2_kg_per_hr, methane_reacted * (2.0 * H2_MW_KG_PER_MOL / CH4_MW_KG_PER_MOL))
 
     carbon_rate_kg_per_hr = carbon_kg_per_hr * carbon_proxy
     feed_for_scaling = max(inputs.methane_kg_per_hr, 1e-9)

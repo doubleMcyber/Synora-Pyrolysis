@@ -90,12 +90,7 @@ def evaluate_design_surrogate(
     methane_mol_per_hr = design.methane_kg_per_hr / CH4_MW_KG_PER_MOL
     h2_rate_kg_per_hr = methane_mol_per_hr * h2_yield * H2_MW_KG_PER_MOL
     h2_rate_std_kg_per_hr = methane_mol_per_hr * h2_yield_std * H2_MW_KG_PER_MOL
-    carbon_generation_rate = (
-        design.methane_kg_per_hr
-        * conversion
-        * CARBON_FROM_CH4_MASS_RATIO
-        * design.effective_carbon_release_factor
-    )
+    carbon_generation_rate = design.methane_kg_per_hr * conversion * CARBON_FROM_CH4_MASS_RATIO
     fouling_risk_index = carbon_proxy * design.effective_carbon_release_factor
     fouling_risk_std = carbon_proxy_std * design.effective_carbon_release_factor
 
@@ -260,10 +255,7 @@ def evaluate_multizone_surrogate(
     h2_rate_std_kg_per_hr = methane_mol_per_hr * h2_yield_std * H2_MW_KG_PER_MOL
 
     carbon_generation_rate = (
-        design.methane_kg_per_hr
-        * conversion_total
-        * CARBON_FROM_CH4_MASS_RATIO
-        * design.effective_carbon_release_factor
+        design.methane_kg_per_hr * conversion_total * CARBON_FROM_CH4_MASS_RATIO
     )
     is_ood = any(zone_ood_flags)
     ood_score = max(zone_ood_scores) if zone_ood_scores else 0.0
