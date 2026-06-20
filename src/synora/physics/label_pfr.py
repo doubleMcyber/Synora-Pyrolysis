@@ -99,6 +99,11 @@ class PFRLabeler:
         self._gas.TPX = temperature_k, pressure_pa, mixture
 
         reactor = self._ct.IdealGasConstPressureReactor(self._gas, clone=False)
+        # Hold temperature fixed (isothermal). Methane pyrolysis is endothermic, so an
+        # energy-enabled (adiabatic) reactor self-cools and the labeled temperature_c would
+        # only be the inlet temperature, not the reaction temperature. The surrogate indexes
+        # conversion/yield on temperature_c as the reaction temperature, so we keep T constant.
+        reactor.energy_enabled = False
         network = self._ct.ReactorNet([reactor])
 
         n_total_in = reactor.mass / self._gas.mean_molecular_weight
@@ -151,6 +156,13 @@ class PFRLabeler:
         if methane_kg_per_hr is not None:
             methane_mol_per_hr = methane_kg_per_hr / CH4_MW_KG_PER_MOL
             h2_kg_per_hr = methane_mol_per_hr * h2_yield * H2_MW_KG_PER_MOL
+            # Stoichiometric upper bound on depositable solid carbon (CH4 -> C + 2 H2).
+            # gri30 is a gas-phase-only mechanism with no solid-carbon species, so a strict
+            # gas-phase carbon balance yields ~0 deposited carbon (carbon is conserved among
+            # gas species). We therefore report the stoichiometric ceiling of converted-methane
+            # carbon. This stays mass-consistent: carbon + h2 <= methane reacted because
+            # Cantera's h2_yield never exceeds 2 mol H2 per converted CH4. A true soot estimate
+            # would require a solid-carbon/PAH submodel the mechanism does not provide.
             carbon_kg_per_hr = methane_kg_per_hr * methane_conversion * CARBON_FROM_CH4_MASS_RATIO
             result["methane_kg_per_hr"] = float(methane_kg_per_hr)
             result["h2_kg_per_hr"] = float(max(0.0, h2_kg_per_hr))
