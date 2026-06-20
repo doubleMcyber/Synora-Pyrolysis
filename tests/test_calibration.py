@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+import os
+
 import numpy as np
 import pandas as pd
 
 from synora.calibration.surrogate_fit import (
     calibrated_predict,
     fit_surrogate,
+    load_surrogate_params,
     predict_with_model,
     predict_with_uncertainty,
     save_surrogate_params,
@@ -130,3 +134,25 @@ def test_ensemble_has_stable_rmse_vs_members() -> None:
     for target in ("methane_conversion", "h2_yield_mol_per_mol_ch4", "carbon_formation_index"):
         member_rmses = [member.rmse[target] for member in model.members]
         assert model.rmse[target] <= np.mean(member_rmses) + 1e-9
+
+
+def test_surrogate_cache_invalidates_on_mtime(tmp_path) -> None:
+    path = tmp_path / "params.json"
+    dataset = _synthetic_dataset()
+    model_a = fit_surrogate(dataset, degree=2, ensemble_size=1, random_seed=1)
+    save_surrogate_params(model_a, path)
+    coeffs_a = load_surrogate_params(path).coefficients["methane_conversion"]
+
+    # A clearly different model fit on halved conversion targets.
+    other = dataset.copy()
+    other["methane_conversion"] = other["methane_conversion"] * 0.5
+    model_b = fit_surrogate(other, degree=2, ensemble_size=1, random_seed=1)
+
+    # Overwrite the file out-of-band (bypassing save's cache update) with a newer mtime.
+    path.write_text(json.dumps(model_b.to_dict()), encoding="utf-8")
+    stat = path.stat()
+    os.utime(path, (stat.st_atime, stat.st_mtime + 10))
+
+    coeffs_b = load_surrogate_params(path).coefficients["methane_conversion"]
+    # The cache must have been invalidated by the changed mtime, reflecting model B.
+    assert coeffs_b != coeffs_a

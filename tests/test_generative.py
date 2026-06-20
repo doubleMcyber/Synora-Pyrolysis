@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from synora.generative.design_space import ReactorDesign
-from synora.generative.objectives import evaluate_design_surrogate
+from synora.generative.objectives import (
+    CH4_MW_KG_PER_MOL,
+    H2_MW_KG_PER_MOL,
+    evaluate_design_surrogate,
+)
 from synora.generative.optimizer import propose_designs
 
 
@@ -115,3 +119,64 @@ def test_optimizer_returns_top_k_and_feasible_designs(tmp_path) -> None:
 
     assert len(proposals) == 6
     assert all(item.violation_count == 0 for item in proposals)
+    # Feasible designs must be returned in descending score order (the optimizer's contract).
+    scores = [item.score for item in proposals]
+    assert scores == sorted(scores, reverse=True)
+
+
+def _carbon_design(removal: float) -> ReactorDesign:
+    return ReactorDesign(
+        length_m=4.0,
+        diameter_m=0.25,
+        pressure_atm=1.3,
+        temp_c=1100.0,
+        methane_kg_per_hr=120.0,
+        dilution_frac=0.80,
+        carbon_removal_eff=removal,
+    )
+
+
+def test_carbon_revenue_rises_with_capture_generation_unchanged() -> None:
+    lo = evaluate_design_surrogate(_carbon_design(0.10), surrogate_params_path=None)
+    hi = evaluate_design_surrogate(_carbon_design(0.90), surrogate_params_path=None)
+    # Only meaningful if carbon is actually produced (conversion > 0).
+    assert lo["carbon_generation_rate"] > 0.0
+    # Captured carbon is the sellable byproduct, so higher capture -> higher profit.
+    assert hi["profit_per_hr"] > lo["profit_per_hr"]
+    # Reported generation is total generation, independent of capture efficiency.
+    assert hi["carbon_generation_rate"] == pytest.approx(lo["carbon_generation_rate"])
+
+
+def test_h2_rate_matches_molar_identity() -> None:
+    design = ReactorDesign(
+        length_m=1.2,
+        diameter_m=0.09,
+        pressure_atm=1.0,
+        temp_c=1050.0,
+        methane_kg_per_hr=100.0,
+        dilution_frac=0.80,
+        carbon_removal_eff=0.5,
+    )
+    metrics = evaluate_design_surrogate(design, surrogate_params_path=None)
+    expected = (
+        (design.methane_kg_per_hr / CH4_MW_KG_PER_MOL)
+        * metrics["h2_yield_mol_per_mol_ch4"]
+        * H2_MW_KG_PER_MOL
+    )
+    assert metrics["h2_rate"] == pytest.approx(expected)
+
+
+def test_conversion_monotonic_in_temperature() -> None:
+    def conversion_at(temp_c: float) -> float:
+        design = ReactorDesign(
+            length_m=1.2,
+            diameter_m=0.09,
+            pressure_atm=1.0,
+            temp_c=temp_c,
+            methane_kg_per_hr=100.0,
+            dilution_frac=0.80,
+            carbon_removal_eff=0.5,
+        )
+        return float(evaluate_design_surrogate(design, surrogate_params_path=None)["conversion"])
+
+    assert conversion_at(1100.0) >= conversion_at(900.0)
