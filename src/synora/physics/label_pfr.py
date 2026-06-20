@@ -157,10 +157,11 @@ class PFRLabeler:
             methane_mol_per_hr = methane_kg_per_hr / CH4_MW_KG_PER_MOL
             h2_kg_per_hr = methane_mol_per_hr * h2_yield * H2_MW_KG_PER_MOL
             # Stoichiometric upper bound on depositable solid carbon (CH4 -> C + 2 H2).
-            # gri30 is a gas-phase-only mechanism with no solid-carbon species, so a strict
-            # gas-phase carbon balance yields ~0 deposited carbon (carbon is conserved among
-            # gas species). We therefore report the stoichiometric ceiling of converted-methane
-            # carbon. This stays mass-consistent: carbon + h2 <= methane reacted because
+            # gri30 has no solid/condensed-carbon deposition pathway, so carbon atoms are
+            # conserved among gas-phase species and a strict gas-phase carbon balance yields
+            # ~0 deposited carbon. We therefore report the stoichiometric ceiling of
+            # converted-methane carbon. This stays mass-consistent: carbon + h2 <= methane
+            # reacted because
             # Cantera's h2_yield never exceeds 2 mol H2 per converted CH4. A true soot estimate
             # would require a solid-carbon/PAH submodel the mechanism does not provide.
             carbon_kg_per_hr = methane_kg_per_hr * methane_conversion * CARBON_FROM_CH4_MASS_RATIO
