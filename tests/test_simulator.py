@@ -1,3 +1,5 @@
+import pytest
+
 from synora.twin.simulator import build_visual_frame, run_simulation
 
 
@@ -78,3 +80,24 @@ def test_build_visual_frame_maps_required_keys_and_ranges() -> None:
     assert 0.0 <= frame["conversion"] <= 1.0
     assert frame["fouling_index"] >= 0
     assert 0.0 <= frame["confidence"] <= 1.0
+
+
+def test_cum_profit_integrates_over_dt_hr() -> None:
+    df = run_simulation(
+        hours=3,
+        methane_kg_per_hr=100.0,
+        temp=980.0,
+        residence_time_s=2.0,
+        ticks_per_hour=4,
+    )
+    dt_hr = 0.25
+    expected = (df["profit_per_hr"] * dt_hr).cumsum().iloc[-1]
+    assert df["cum_profit_usd"].iloc[-1] == pytest.approx(expected)
+    # Must NOT equal the un-integrated cumsum; the pre-fix bug overcounts by ticks_per_hour.
+    naive = df["profit_per_hr"].cumsum().iloc[-1]
+    assert df["cum_profit_usd"].iloc[-1] != pytest.approx(naive)
+
+
+def test_cum_profit_equals_cumsum_at_unit_ticks() -> None:
+    df = run_simulation(hours=4, methane_kg_per_hr=100.0, temp=980.0, residence_time_s=2.0)
+    assert df["cum_profit_usd"].iloc[-1] == pytest.approx(df["profit_per_hr"].cumsum().iloc[-1])

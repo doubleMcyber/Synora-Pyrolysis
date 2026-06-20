@@ -1,4 +1,14 @@
-from synora.reactor.model import ReactorInputs, ReactorState, apply_maintenance, simulate_step
+import pytest
+
+from synora.reactor.model import (
+    CARBON_FROM_CH4_MASS_RATIO,
+    CH4_MW_KG_PER_MOL,
+    H2_MW_KG_PER_MOL,
+    ReactorInputs,
+    ReactorState,
+    apply_maintenance,
+    simulate_step,
+)
 
 
 def test_simulate_step_returns_non_negative_outputs() -> None:
@@ -46,3 +56,24 @@ def test_maintenance_restores_health() -> None:
     assert restored.health == 0.96
     assert restored.hours_operated == degraded_state.hours_operated
     assert restored.conversion > degraded_state.conversion
+
+
+def test_h2_capped_at_stoichiometry_and_carbon_mass_balance() -> None:
+    inputs = ReactorInputs(
+        methane_kg_per_hr=100.0,
+        temp_c=1100.0,
+        residence_time_s=5.0,
+        max_conversion=0.99,
+    )
+    _, outputs = simulate_step(inputs, ReactorState())
+    methane_reacted = inputs.methane_kg_per_hr * outputs.conversion
+    assert methane_reacted > 0.0
+
+    # Carbon is exactly the converted-methane mass ratio.
+    assert outputs.carbon_kg_per_hr == pytest.approx(methane_reacted * CARBON_FROM_CH4_MASS_RATIO)
+    # H2 never exceeds the exact CH4 -> 2 H2 stoichiometric ceiling (2*H2_MW/CH4_MW).
+    stoich_h2_per_reacted = 2.0 * H2_MW_KG_PER_MOL / CH4_MW_KG_PER_MOL
+    assert outputs.h2_kg_per_hr <= methane_reacted * stoich_h2_per_reacted + 1e-9
+    # Mass balance: solid carbon + H2 cannot exceed the reacted methane. Combined with the
+    # exact carbon ratio above, this pins the H2 ceiling to the precise stoichiometric value.
+    assert outputs.carbon_kg_per_hr + outputs.h2_kg_per_hr <= methane_reacted + 1e-9
