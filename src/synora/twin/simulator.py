@@ -281,8 +281,11 @@ def run_simulation(
         )
         ood_raw = max(0.0, float(reactor_outputs.ood_score))
         ood_scaled = (ood_raw / (ood_raw + 25.0)) * 8.0
+        # ood_score here is a display severity rescaled to 0..10 (not the raw surrogate
+        # score), combining surrogate OOD with fouling. is_out_of_distribution is a bool,
+        # consistent with reactor.model and the surrogate, so all consumers read one type.
         ood_score = max(0.0, min(10.0, ood_scaled + (1.8 * fouling_index)))
-        is_ood = float(
+        is_ood = bool(
             (ood_score >= 8.5)
             or (bool(reactor_outputs.is_out_of_distribution) and (fouling_index >= 0.35))
         )
