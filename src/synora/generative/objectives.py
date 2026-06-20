@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -54,6 +55,17 @@ def _heat_loss_proxy(design: ReactorDesign) -> float:
     return float(max(0.0, heat_loss_watts / max(methane_energy_watts, 1e-9)))
 
 
+def _pressure_correction_factor(pressure_atm: float) -> float:
+    """Heuristic placeholder for pressure sensitivity (NOT physics-derived).
+
+    The surrogate is fit only on (temperature_c, residence_time_s) at a fixed 1 atm,
+    so it carries no real pressure dependence. This linear nudge (clipped to +/-15%)
+    is an explicit stand-in. To replace it with real physics, add pressure_atm as a
+    third PFR feature and regenerate the dataset across a range of pressures.
+    """
+    return float(np.clip(1.0 + (0.03 * (pressure_atm - 1.0)), 0.85, 1.15))
+
+
 def evaluate_design_surrogate(
     design: ReactorDesign,
     surrogate_params_path: str | Path | None = None,
@@ -79,7 +91,7 @@ def evaluate_design_surrogate(
     is_ood = bool(pred.get("is_out_of_distribution", False))
     ood_score = float(pred.get("ood_score", 0.0))
 
-    pressure_factor = np.clip(1.0 + (0.03 * (design.pressure_atm - 1.0)), 0.85, 1.15)
+    pressure_factor = _pressure_correction_factor(design.pressure_atm)
     conversion = float(np.clip(conversion_mean * pressure_factor, 0.0, 0.99))
     conversion_std = float(max(0.0, conversion_std * pressure_factor))
     h2_yield = float(np.clip(h2_yield_mean * pressure_factor, 0.0, 2.0))
@@ -97,9 +109,11 @@ def evaluate_design_surrogate(
     pressure_drop = _pressure_drop_proxy(design)
     heat_loss = _heat_loss_proxy(design)
 
+    # Only captured carbon is sellable; the uncaptured remainder fouls the reactor.
+    carbon_sales_rate = carbon_generation_rate * design.carbon_removal_eff
     economics = hourly_economics(
         h2_kg_per_hr=max(0.0, h2_rate_kg_per_hr),
-        carbon_kg_per_hr=max(0.0, carbon_generation_rate),
+        carbon_kg_per_hr=max(0.0, carbon_sales_rate),
         methane_kg_per_hr=design.methane_kg_per_hr,
         econ_inputs=econ,
     )
@@ -140,6 +154,7 @@ def evaluate_design_surrogate(
         "profit_per_hr": float(economics["profit_per_hr"]),
         "lcoh_usd_per_kg": float(economics["lcoh_usd_per_kg"]),
         "carbon_generation_rate": float(max(0.0, carbon_generation_rate)),
+        "methane_kg_per_hr": float(design.methane_kg_per_hr),
         "is_out_of_distribution": is_ood,
         "ood_score": ood_score,
         "constraint_violations": violations,
@@ -244,7 +259,7 @@ def evaluate_multizone_surrogate(
     fouling_risk_total = float(max(0.0, fouling_total))
     fouling_risk_std = float(max(0.0, np.sqrt(max(0.0, fouling_variance))))
 
-    pressure_factor = np.clip(1.0 + (0.03 * (design.pressure_atm - 1.0)), 0.85, 1.15)
+    pressure_factor = _pressure_correction_factor(design.pressure_atm)
     conversion_total = float(np.clip(conversion_total * pressure_factor, 0.0, 0.995))
     conversion_std = float(max(0.0, conversion_std * pressure_factor))
     h2_yield_total = float(np.clip(h2_yield_total * pressure_factor, 0.0, 2.0))
@@ -272,9 +287,11 @@ def evaluate_multizone_surrogate(
     pressure_drop_proxy = dp_total_kpa / max(design.dp_max_kpa, 1e-9)
     heat_loss_proxy = q_loss_kw / max(design.power_max_kw, 1e-9)
 
+    # Only captured carbon is sellable; the uncaptured remainder fouls the reactor.
+    carbon_sales_rate = carbon_generation_rate * design.carbon_removal_eff
     economics = hourly_economics(
         h2_kg_per_hr=max(0.0, h2_rate_kg_per_hr),
-        carbon_kg_per_hr=max(0.0, carbon_generation_rate),
+        carbon_kg_per_hr=max(0.0, carbon_sales_rate),
         methane_kg_per_hr=design.methane_kg_per_hr,
         econ_inputs=econ,
     )
@@ -316,6 +333,7 @@ def evaluate_multizone_surrogate(
         "profit_per_hr": float(economics["profit_per_hr"]),
         "lcoh_usd_per_kg": float(economics["lcoh_usd_per_kg"]),
         "carbon_generation_rate": float(max(0.0, carbon_generation_rate)),
+        "methane_kg_per_hr": float(design.methane_kg_per_hr),
         "is_out_of_distribution": bool(is_ood),
         "ood_score": float(ood_score),
         "constraint_violations": sorted(set(violations)),
@@ -338,8 +356,41 @@ def evaluate_multizone_surrogate(
     return metrics
 
 
-def scalarize_metrics(metrics: dict[str, float | bool | list[str]]) -> float:
-    profit = float(metrics["profit_per_hr"])
+# Reference methane feed used to normalize the profit term so the objective is
+# scale-invariant (a design is not rewarded merely for processing more methane).
+PROFIT_REFERENCE_METHANE_KG_PER_HR = 100.0
+
+
+@dataclass(frozen=True)
+class ScalarizationWeights:
+    """Weights for the scalar design objective.
+
+    Every term is intensive (independent of plant size): the profit term is
+    normalized to PROFIT_REFERENCE_METHANE_KG_PER_HR and the rest are already
+    dimensionless ratios/indices. Penalty terms (fouling, pressure drop, heat
+    loss, out-of-distribution, constraint violations) are subtracted. Pass a
+    custom instance to scalarize_metrics to retune without editing this module.
+    """
+
+    profit: float = 1.0  # weight on size-normalized profit ($/hr at the reference feed)
+    conversion: float = 35.0
+    fouling_risk_index: float = 18.0
+    pressure_drop_proxy: float = 8.0
+    heat_loss_proxy: float = 6.0
+    ood_score: float = 12.0
+    constraint_violation: float = 60.0
+
+
+def scalarize_metrics(
+    metrics: dict[str, float | bool | list[str]],
+    weights: ScalarizationWeights | None = None,
+) -> float:
+    w = weights or ScalarizationWeights()
+    methane_kg_per_hr = float(metrics.get("methane_kg_per_hr", PROFIT_REFERENCE_METHANE_KG_PER_HR))
+    # Normalize profit to the reference feed so larger plants are not favored on size alone.
+    profit = float(metrics["profit_per_hr"]) * (
+        PROFIT_REFERENCE_METHANE_KG_PER_HR / max(methane_kg_per_hr, 1e-9)
+    )
     conversion = float(metrics["conversion"])
     fouling = float(metrics["fouling_risk_index"])
     pressure_drop = float(metrics["pressure_drop_proxy"])
@@ -347,13 +398,13 @@ def scalarize_metrics(metrics: dict[str, float | bool | list[str]]) -> float:
     ood_score = float(metrics.get("ood_score", 0.0))
     violation_count = float(metrics["constraint_violation_count"])
     return (
-        profit
-        + (35.0 * conversion)
-        - (18.0 * fouling)
-        - (8.0 * pressure_drop)
-        - (6.0 * heat_loss)
-        - (12.0 * ood_score)
-        - (60.0 * violation_count)
+        (w.profit * profit)
+        + (w.conversion * conversion)
+        - (w.fouling_risk_index * fouling)
+        - (w.pressure_drop_proxy * pressure_drop)
+        - (w.heat_loss_proxy * heat_loss)
+        - (w.ood_score * ood_score)
+        - (w.constraint_violation * violation_count)
     )
 
 
@@ -361,5 +412,6 @@ __all__ = [
     "evaluate_design_surrogate",
     "evaluate_multizone_surrogate",
     "scalarize_metrics",
+    "ScalarizationWeights",
     "DEFAULT_CONSTRAINTS",
 ]
