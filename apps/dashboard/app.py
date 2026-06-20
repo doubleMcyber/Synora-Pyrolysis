@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -450,10 +451,14 @@ def _spark_metric_row(
     with st.container(border=True):
         spark_col, metric_col = st.columns([0.44, 0.56], gap="small")
         spark_fig, trend_color, trend_symbol = _sparkline_figure(series, color=color)
+        # Every sparkline shares the same figure parameters, so Streamlit's auto ID
+        # collides across rows. The label is unique per row, so derive a stable key.
+        spark_key = "spark_" + re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
         spark_col.plotly_chart(
             spark_fig,
             width="stretch",
             config={"displayModeBar": False, "staticPlot": True},
+            key=spark_key,
         )
         metric_col.markdown(
             (
