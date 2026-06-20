@@ -54,8 +54,9 @@ def reaction_heat_kw(design: MultiZoneDesign, overall_conversion: float) -> floa
 
 
 def sensible_heat_kw(design: MultiZoneDesign) -> float:
-    methane_kg_per_s = design.methane_kg_per_hr / 3600.0
-    total_mass_flow_kg_per_s = methane_kg_per_s / max(1.0 - design.dilution_frac, 1e-6)
+    total_mass_flow_kg_per_s = (
+        design.total_molar_flow_mol_per_s * _mean_molecular_weight_kg_per_mol(design.dilution_frac)
+    )
     avg_temp_c = float(np.mean(design.zone_temperatures_c))
     delta_t = max(0.0, avg_temp_c - design.ambient_temp_c)
     return float(max(0.0, total_mass_flow_kg_per_s * CP_MIX_J_PER_KGK * delta_t / 1000.0))
