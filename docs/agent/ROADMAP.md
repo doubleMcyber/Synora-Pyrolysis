@@ -14,14 +14,16 @@
 - Streamlit demo
 
 ## Phase 3 — Optimization Layer
-- Linear programming dispatch
-- Health decay modeling
-- Maintenance scheduling
+- Health decay modeling ✅ (`synora.reactor.model`)
+- Maintenance scheduling ✅ (`synora.twin.simulator`)
+- Linear programming dispatch — deferred/descoped. The generative design layer
+  (`synora.generative.optimizer`, surrogate-objective search) replaced the
+  originally-planned LP optimization layer.
 
-## Phase 4 — Multi-node Network
-- Carbon routing
-- Capacity constraints
-- Profit maximization
+## Phase 4 — Multi-node Network — deferred/descoped
+- Carbon routing, capacity constraints, and multi-node profit maximization were
+  not built. Single-asset design exploration + economics is the current scope.
+  (The `logistics`/`optimization` stub packages for this phase were removed.)
 
 Each phase must produce:
 - Working demo capability

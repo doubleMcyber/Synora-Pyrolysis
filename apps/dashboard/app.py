@@ -763,7 +763,7 @@ st.caption("Methane pyrolysis control room with simulation, optimization, and va
 if physics_df is None:
     st.warning(
         "No physics parquet found in data/processed/physics_runs. "
-        "Run scripts/physics/generate_pfr_dataset.py to enable physics overlays."
+        "Run `synora-generate-pfr` (python -m synora.physics.dataset_cli) to enable physics overlays."
     )
 elif params_path is None:
     st.warning("Physics data found, but surrogate params were not generated.")
