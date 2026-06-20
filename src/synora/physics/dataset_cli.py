@@ -10,7 +10,7 @@ import pandas as pd
 
 from synora.physics.label_pfr import DEFAULT_MECHANISM_PATH, PFRLabeler
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "processed" / "physics_runs"
 
 TEMPERATURE_RANGE_C = (850.0, 1100.0)

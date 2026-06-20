@@ -91,7 +91,7 @@ Contracts:
 - Flags hard limits: `material_tmax_c`, `dp_max_kpa`, and `power_max_kw`.
 - Executes in sub-second candidate loops.
 
-### scripts/physics/generate_pfr_dataset.py
+### src/synora/physics/dataset_cli.py (`synora-generate-pfr`)
 Purpose: Batch physics label generation for calibration datasets.
 Contract:
 - Calls shared physics wrapper (`synora.physics.label_pfr`) instead of duplicating Cantera logic.
@@ -109,7 +109,7 @@ Contract:
 
 dataset -> fit -> propose -> label -> refit
 
-1. `scripts/physics/generate_pfr_dataset.py` or active-learning labeling produces parquet physics data.
+1. `synora.physics.dataset_cli` (`synora-generate-pfr`) or active-learning labeling produces parquet physics data.
 2. `synora.calibration.surrogate_fit` fits surrogate parameters.
 3. `synora.generative.optimizer.propose_designs` explores design space with surrogate objectives.
 4. `synora.physics.label_pfr` verifies selected candidates with physics.

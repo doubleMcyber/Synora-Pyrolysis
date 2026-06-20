@@ -3,7 +3,8 @@
 These values are placeholder MVP assumptions:
 
 Temperature Range:
-650–950°C
+- Physics surrogate (Cantera PFR labeling, `synora.physics.dataset_cli`): 850–1100°C
+- Legacy toy reactor model: 650–950°C
 
 Conversion:
 0–85% maximum in toy model
